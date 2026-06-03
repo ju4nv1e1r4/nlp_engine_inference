@@ -17,4 +17,3 @@ ort        = { version = "2.0.0-rc.12", features = ["download-binaries"] }
 tokenizers = "0.21"
 thiserror  = "2"
 chrono     = { version = "0.4",  features = ["serde"] }
-ndarray    = "0.16"

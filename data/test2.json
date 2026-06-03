@@ -1,0 +1,4 @@
+{
+    "model": "onnx-community/biomedical-ner-all-ONNX",
+    "input": ["The patient presented with migraine and eye pain.."]
+}

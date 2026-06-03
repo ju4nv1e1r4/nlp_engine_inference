@@ -1,0 +1,6 @@
+{
+    "model": "onnx-community/biomedical-ner-all-ONNX",
+    "input": [
+        "Paciente com tosse costante, espirros e coriza, nariz vermelho e falta de ar."
+    ]
+}

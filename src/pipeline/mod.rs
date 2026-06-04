@@ -1,7 +1,7 @@
 pub mod ner;
 
 use crate::error::AppError;
-use crate::types::{Entity, TextResult};
+use crate::types::TextResult;
 use std::collections::HashMap;
 
 pub trait Pipeline: Send + Sync {

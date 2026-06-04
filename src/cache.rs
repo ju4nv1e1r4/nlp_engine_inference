@@ -17,16 +17,6 @@ pub fn cache_dir(model_id: &str) -> Result<PathBuf, AppError> {
     Ok(current_dir.join("models").join(parts[0]).join(parts[1]))
 }
 
-/// Returns true if all filenames listed exist in the cache directory.
-pub fn all_cached(model_id: &str, filenames: &[&str]) -> Result<bool, AppError> {
-    let dir = cache_dir(model_id)?;
-    for filename in filenames {
-        if !dir.join(filename).exists() {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
 
 /// Removes the complete cache directory for the model_id.
 /// Used by the --refresh-model flag.

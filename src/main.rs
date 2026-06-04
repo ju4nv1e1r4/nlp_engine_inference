@@ -45,8 +45,8 @@ async fn run() -> Result<(), AppError> {
     let request: InferenceRequest = serde_json::from_str(&input_content)
         .map_err(|e| AppError::JsonError(format!("invalid input JSON: {}", e)))?;
 
-    if !request.model.contains('/') {
-        return Err(AppError::InvalidInput("model id must contain '/'".into()));
+    if !request.model.contains('/') && !std::path::Path::new(&request.model).is_dir() {
+        return Err(AppError::InvalidInput("model id must contain '/' or be a valid local directory".into()));
     }
     if request.input.is_empty() {
         return Err(AppError::InvalidInput("input array must not be empty".into()));
@@ -54,34 +54,44 @@ async fn run() -> Result<(), AppError> {
 
     let client = Client::new();
 
-    if cli.refresh_model {
+    let is_local_dir = std::path::Path::new(&request.model).is_dir();
+
+    if cli.refresh_model && !is_local_dir {
         cache::clear(&request.model).await?;
     }
 
-    let cache_dir = cache::cache_dir(&request.model)?;
+    let cache_dir = if is_local_dir {
+        std::path::PathBuf::from(&request.model)
+    } else {
+        cache::cache_dir(&request.model)?
+    };
 
-    eprintln!("[inference-engine] Downloading files for model {}...", request.model);
-    eprintln!("[inference-engine] Warning: ONNX models may be large. Wait for download to complete.");
+    if !is_local_dir {
+        eprintln!("[inference-engine] Downloading files for model {}...", request.model);
+        eprintln!("[inference-engine] Warning: ONNX models may be large. Wait for download to complete.");
 
-    let siblings = hub::list_model_files(&client, &request.model).await?;
+        let siblings = hub::list_model_files(&client, &request.model).await?;
 
-    let mandatory_files = ["config.json", "tokenizer.json"];
-    let optional_files = ["tokenizer_config.json", "special_tokens_map.json"];
+        let mandatory_files = ["config.json", "tokenizer.json"];
+        let optional_files = ["tokenizer_config.json", "special_tokens_map.json"];
 
-    for file in mandatory_files {
-        let dest = cache_dir.join(file);
-        if !dest.exists() {
-            hub::download_file(&client, &request.model, file, &dest).await?;
-        }
-    }
-
-    for file in optional_files {
-        let dest = cache_dir.join(file);
-        if !dest.exists() {
-            if siblings.iter().any(|s| s.rfilename == file) {
+        for file in mandatory_files {
+            let dest = cache_dir.join(file);
+            if !dest.exists() {
                 hub::download_file(&client, &request.model, file, &dest).await?;
             }
         }
+
+        for file in optional_files {
+            let dest = cache_dir.join(file);
+            if !dest.exists() {
+                if siblings.iter().any(|s| s.rfilename == file) {
+                    hub::download_file(&client, &request.model, file, &dest).await?;
+                }
+            }
+        }
+    } else {
+        eprintln!("[inference-engine] Using local model directory: {}", request.model);
     }
 
     let config_content = tokio::fs::read_to_string(cache_dir.join("config.json"))
@@ -95,32 +105,48 @@ async fn run() -> Result<(), AppError> {
 
     let tokenizer = tokenizer::load(&cache_dir)?;
 
-    let mut onnx_files: Vec<&hub::HfFile> = siblings
-        .iter()
-        .filter(|f| f.rfilename.ends_with(".onnx"))
-        .collect();
+    let mut onnx_paths = Vec::new();
+    if is_local_dir {
+        let mut entries = tokio::fs::read_dir(&cache_dir).await.map_err(|e| AppError::IoError(e.to_string()))?;
+        while let Some(entry) = entries.next_entry().await.map_err(|e| AppError::IoError(e.to_string()))? {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("onnx") {
+                onnx_paths.push(path);
+            }
+        }
+    } else {
+        let siblings = hub::list_model_files(&client, &request.model).await.unwrap_or_default();
+        let mut onnx_files: Vec<&hub::HfFile> = siblings
+            .iter()
+            .filter(|f| f.rfilename.ends_with(".onnx"))
+            .collect();
+        onnx_files.sort_by_key(|f| f.size.unwrap_or(u64::MAX));
+        for f in onnx_files {
+            let dest = cache_dir.join(&f.rfilename);
+            if !dest.exists() {
+                if let Err(e) = hub::download_file(&client, &request.model, &f.rfilename, &dest).await {
+                    eprintln!("[inference-engine] Failed to download ONNX file {}: {}", f.rfilename, e);
+                    continue;
+                }
+            }
+            onnx_paths.push(dest);
+        }
+    }
 
-    onnx_files.sort_by_key(|f| f.size.unwrap_or(u64::MAX));
-
-    if onnx_files.is_empty() {
+    if onnx_paths.is_empty() {
         return Err(AppError::OnnxLoadFailed(request.model.clone()));
     }
 
     let mut session: Option<ort::session::Session> = None;
-    for onnx_file in &onnx_files {
-        let onnx_path = cache_dir.join(&onnx_file.rfilename);
-        if !onnx_path.exists() {
-            hub::download_file(&client, &request.model, &onnx_file.rfilename, &onnx_path).await?;
-        }
-
-        eprintln!("[inference-engine] Download is done. Loading model...");
-        match model::load_session(&onnx_path) {
+    for onnx_path in &onnx_paths {
+        eprintln!("[inference-engine] Loading model from {:?}...", onnx_path);
+        match model::load_session(onnx_path) {
             Ok(s) => {
                 session = Some(s);
                 break;
             }
             Err(e) => {
-                eprintln!("[inference-engine] Failed to load {}: {}. Trying next file...", onnx_file.rfilename, e);
+                eprintln!("[inference-engine] Failed to load {:?}: {}. Trying next file...", onnx_path, e);
             }
         }
     }
@@ -139,8 +165,9 @@ async fn run() -> Result<(), AppError> {
 
         let input_ids: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
         let attention_mask: Vec<i64> = encoding.get_attention_mask().iter().map(|&m| m as i64).collect();
+        let type_ids: Vec<i64> = encoding.get_type_ids().iter().map(|&id| id as i64).collect();
 
-        let logits = model::run(&mut session, &input_ids, &attention_mask)?;
+        let logits = model::run(&mut session, &input_ids, &attention_mask, &type_ids)?;
 
         let text_result = pipeline.process(text, &encoding, logits, &id2label)?;
         results.push(text_result);

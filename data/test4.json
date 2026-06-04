@@ -1,0 +1,4 @@
+{
+    "model": "models/pucpr_clinicalnerpt-disease",
+    "input": ["Paciente com diabetes, apresenta tontura e vertigem."]
+}

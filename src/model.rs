@@ -23,22 +23,31 @@ pub fn run(
     session: &mut Session,
     input_ids: &[i64],
     attention_mask: &[i64],
+    token_type_ids: &[i64],
 ) -> Result<Vec<Vec<f32>>, AppError> {
     let seq_len = input_ids.len();
 
-    let ids_tensor = ort::value::Value::from_array(([1, seq_len], input_ids.to_vec()))
+    let ids_tensor = ort::value::Tensor::from_array(([1, seq_len], input_ids.to_vec()))
         .map_err(|e: ort::Error| AppError::InferenceFailed(e.to_string()))?;
-    let mask_tensor = ort::value::Value::from_array(([1, seq_len], attention_mask.to_vec()))
+    let mask_tensor = ort::value::Tensor::from_array(([1, seq_len], attention_mask.to_vec()))
         .map_err(|e: ort::Error| AppError::InferenceFailed(e.to_string()))?;
 
-    let ort_inputs = ort::inputs![
-        "input_ids" => ids_tensor,
-        "attention_mask" => mask_tensor,
-    ];
+    let expects_type_ids = session.inputs().iter().any(|i| i.name() == "token_type_ids");
 
-    let outputs = session
-        .run(ort_inputs)
-        .map_err(|e: ort::Error| AppError::InferenceFailed(e.to_string()))?;
+    let outputs = if expects_type_ids {
+        let type_tensor = ort::value::Tensor::from_array(([1, seq_len], token_type_ids.to_vec()))
+            .map_err(|e: ort::Error| AppError::InferenceFailed(e.to_string()))?;
+        session.run(ort::inputs![
+            "input_ids" => ids_tensor,
+            "attention_mask" => mask_tensor,
+            "token_type_ids" => type_tensor,
+        ]).map_err(|e: ort::Error| AppError::InferenceFailed(e.to_string()))?
+    } else {
+        session.run(ort::inputs![
+            "input_ids" => ids_tensor,
+            "attention_mask" => mask_tensor,
+        ]).map_err(|e: ort::Error| AppError::InferenceFailed(e.to_string()))?
+    };
 
     let logits_val = outputs
         .get("logits")

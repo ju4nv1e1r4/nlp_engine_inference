@@ -30,3 +30,8 @@ requirements.txt
 
 # data
 data/samples/
+data/results/
+data/golden_v2.json
+
+# md
+MODEL_DOCUMENTATION.md

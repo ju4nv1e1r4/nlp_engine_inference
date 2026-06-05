@@ -27,3 +27,6 @@ rustc-ice-*.txt
 # python temp stuffs
 *venv
 requirements.txt
+
+# data
+data/sample/

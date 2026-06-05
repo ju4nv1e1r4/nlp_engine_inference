@@ -72,24 +72,39 @@ impl Pipeline for NerPipeline {
                     });
                 }
             } else if label.starts_with("B-") {
-                if let Some(acc) = current.take() {
-                    entities.push(Entity {
-                        text: text[acc.char_start..acc.char_end].to_string(),
-                        label: acc.label_type,
-                        start: acc.char_start,
-                        end: acc.char_end,
-                        softmax_prob: acc.probs.iter().sum::<f32>() / acc.probs.len() as f32,
-                        logit_ort: acc.logits.iter().sum::<f32>() / acc.logits.len() as f32,
-                    });
+                let label_type = &label[2..];
+                let mut should_start_new = false;
+
+                if let Some(mut acc) = current.take() {
+                    if acc.label_type == label_type && acc.char_end == char_start {
+                        acc.char_end = char_end;
+                        acc.logits.push(logit_ort);
+                        acc.probs.push(softmax_prob);
+                        current = Some(acc);
+                    } else {
+                        entities.push(Entity {
+                            text: text[acc.char_start..acc.char_end].to_string(),
+                            label: acc.label_type,
+                            start: acc.char_start,
+                            end: acc.char_end,
+                            softmax_prob: acc.probs.iter().sum::<f32>() / acc.probs.len() as f32,
+                            logit_ort: acc.logits.iter().sum::<f32>() / acc.logits.len() as f32,
+                        });
+                        should_start_new = true;
+                    }
+                } else {
+                    should_start_new = true;
                 }
 
-                current = Some(EntityAccumulator {
-                    label_type: label[2..].to_string(),
-                    char_start,
-                    char_end,
-                    logits: vec![logit_ort],
-                    probs: vec![softmax_prob],
-                });
+                if should_start_new {
+                    current = Some(EntityAccumulator {
+                        label_type: label_type.to_string(),
+                        char_start,
+                        char_end,
+                        logits: vec![logit_ort],
+                        probs: vec![softmax_prob],
+                    });
+                }
             } else if label.starts_with("I-") {
                 let label_type = &label[2..];
                 let mut should_start_new = false;

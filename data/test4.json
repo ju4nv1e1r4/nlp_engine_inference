@@ -1,4 +1,4 @@
 {
-    "model": "models/pucpr_clinicalnerpt-disease",
+    "model": "models/pucpr-br_tempclin-biobertpt-all",
     "input": ["Paciente com diabetes, apresenta tontura e vertigem."]
 }

@@ -1,5 +1,5 @@
 {
-    "model": "onnx-community/biomedical-ner-all-ONNX",
+    "model": "models/pucpr-br_tempclin-biobertpt-all",
     "input": [
         "Paciente com tosse costante, espirros e coriza, nariz vermelho e falta de ar."
     ]

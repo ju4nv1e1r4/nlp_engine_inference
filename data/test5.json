@@ -1,0 +1,6 @@
+{
+    "model": "models/pucpr-br_tempclin-biobertpt-all",
+    "input": [
+        "Paciente admitido na UTI, onde realizou ressonância magnética e foi tratado com ibuprofeno."
+    ]
+}
